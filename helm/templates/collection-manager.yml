@@ -46,6 +46,7 @@ spec:
               memory: {{ .Values.ingestion.collectionManager.memory }}
           volumeMounts:
 {{ include "nexus.ingestion.dataVolumeMount" . | indent 12 }}
+{{ include "nexus.ingestion.scriptsVolumeMount" . | indent 12 }}
             {{- if not $history.solrEnabled }}
             - name: history-volume
               mountPath: {{ include "nexus.history.mountPath" . }}
@@ -54,6 +55,7 @@ spec:
               mountPath: {{ include "nexus.collectionsConfig.mountPath" . }}
       volumes:
 {{ include "nexus.ingestion.dataVolume" . | indent 8 }}
+{{ include "nexus.ingestion.scriptsVolume" . | indent 8 }}
         - name: collections-config-volume
           configMap:
             name: {{ include "nexus.collectionsConfig.configmapName" . }}

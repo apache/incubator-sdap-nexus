@@ -45,6 +45,25 @@ The data volume mount which is used in both the Collection Manager and the Granu
   mountPath: {{ .Values.ingestion.granules.mountPath }}
 {{- end -}}
 
+{/*
+The scripts volume which is used in both the Collection Manager and the Granule Ingester.
+*/}}
+{{- define "nexus.ingestion.scriptsVolume" -}}
+- name: scripts-volume
+  hostPath:
+    path: {{ .Values.ingestion.scripts.path }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The scripts volume mount which is used in both the Collection Manager and the Granule Ingester.
+*/}}
+{{- define "nexus.ingestion.scriptsVolumeMount" -}}
+- name: scripts-volume
+  mountPath: {{ .Values.ingestion.scripts.mountPath }}
+{{- end -}}
+
+
 {{- define "nexus.urls.solr" -}}
 {{ .Values.external.solrHostAndPort | default (print "http://" .Release.Name "-solr-svc:8983") }}
 {{- end -}}

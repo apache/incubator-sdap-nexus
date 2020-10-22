@@ -71,6 +71,21 @@ ingestion:
     ## the granule files are stored.
     path: /var/lib/sdap/granules
 
+  ## How to mount transformation scripts to ingestion pods
+  scripts:
+    ## mountPath is the path in the Collection Manager and Granule Ingester pods
+    ## where the granule files will be mounted
+    ## IMPORTANT: the `path` property on all collections in the Collections Config file
+    ## should match this value.
+    ## Example: if mountPath is set to /data, then every transformation script in the
+    ## Collections Config file should have something like
+    ## path: /scripts/<some-directory>/<some-file-pattern>
+    mountPath: /scripts
+    
+    ## path is the path on either local filesystem or NFS mount at which
+    ## the granule files are stored.
+    path: /var/lib/sdap/scripts
+
   ## Where to find the Collections Config file
   ## ref: https://github.com/apache/incubator-sdap-ingester/tree/dev/collection_manager#the-collections-configuration-file
   ## Either localDir should be set, or the git options, but not both.
