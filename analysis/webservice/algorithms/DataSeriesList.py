@@ -33,11 +33,11 @@ class DataSeriesListCalcHandlerImpl(NexusCalcHandler):
     path = "/list"
     description = "Lists datasets currently available for analysis"
     params = {}
-    remote_sdaps = RemoteSDAPCache()
 
     def __init__(self, tile_service_factory, remote_collections=None, **kwargs):
         super().__init__(tile_service_factory, **kwargs)
         self._remote_collections = remote_collections
+        self.remote_sdaps = RemoteSDAPCache()
 
 
     @cached(ttl=(60 * 60 * 1000))  # 1 hour cached

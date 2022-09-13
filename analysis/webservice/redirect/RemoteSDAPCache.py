@@ -37,7 +37,8 @@ class RemoteSDAPCache:
 
     def get(self, url, short_name):
         stripped_url = url.strip('/')
-        if stripped_url not in self.sdap_lists or self.sdap_lists[stripped_url].outdated_at>datetime.now():
+        logger.debug("")
+        if stripped_url not in self.sdap_lists or self.sdap_lists[stripped_url].outdated_at > datetime.now():
             self._add(stripped_url)
 
         for collection in self.sdap_lists[stripped_url].list:
