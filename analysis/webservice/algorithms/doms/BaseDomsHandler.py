@@ -297,6 +297,8 @@ class DomsCSVFormatter:
 
 
 class DomsNetCDFFormatter:
+    compression = 'zlib'
+    comp_level = 5
     @staticmethod
     def create(executionId, results, params, details):
 
@@ -362,17 +364,20 @@ class DomsNetCDFFormatter:
 
         #Create Satellite group, variables, and attributes
         satelliteGroup = dataset.createGroup(satellite_group_name)
-        satelliteWriter = DomsNetCDFValueWriter(satelliteGroup, params["parameter"])
+        satelliteWriter = DomsNetCDFValueWriter(satelliteGroup, DomsNetCDFFormatter.compression, DomsNetCDFFormatter.comp_level)
 
         # Create InSitu group, variables, and attributes
         insituGroup = dataset.createGroup(insitu_group_name)
-        insituWriter = DomsNetCDFValueWriter(insituGroup, params["parameter"])
+        insituWriter = DomsNetCDFValueWriter(insituGroup, DomsNetCDFFormatter.compression, DomsNetCDFFormatter.comp_level)
 
         # Add data to Insitu and Satellite groups, generate array of match ID pairs
         matches = DomsNetCDFFormatter.__writeResults(results, satelliteWriter, insituWriter)
         dataset.createDimension("MatchedRecords", size=None)
         dataset.createDimension("MatchedGroups", size=2)
-        matchArray = dataset.createVariable("matchIDs", "f4", ("MatchedRecords", "MatchedGroups"))
+        matchArray = dataset.createVariable(
+            'matchIDs', 'f4', ('MatchedRecords', 'MatchedGroups'),
+            compression=DomsNetCDFFormatter.compression, complevel=DomsNetCDFFormatter.comp_level
+        )
         matchArray[:] = matches
 
         dataset.close()
@@ -441,7 +446,7 @@ class DomsNetCDFFormatter:
 
 
 class DomsNetCDFValueWriter:
-    def __init__(self, group, matchup_parameter):
+    def __init__(self, group, compression=None, comp_level=None):
         group.createDimension("dim", size=None)
         self.group = group
 
@@ -453,6 +458,9 @@ class DomsNetCDFValueWriter:
         self.primary_group_name = "PrimaryData"
         self.secondary_group_name = "SecondaryData"
         self.data_map = defaultdict(list)
+
+        self.compression = compression
+        self.comp_level = comp_level
 
     def addData(self, result_item):
         """
@@ -491,9 +499,18 @@ class DomsNetCDFValueWriter:
         #
         # Create variables, enrich with attributes, and add data
         #
-        lonVar = self.group.createVariable('lon', 'f4', ('dim',), fill_value=-32767.0)
-        latVar = self.group.createVariable('lat', 'f4', ('dim',), fill_value=-32767.0)
-        timeVar = self.group.createVariable('time', 'f4', ('dim',), fill_value=-32767.0)
+        lonVar = self.group.createVariable(
+            'lon', 'f4', ('dim',), fill_value=-32767.0,
+            compression=self.compression, complevel=self.comp_level
+        )
+        latVar = self.group.createVariable(
+            'lat', 'f4', ('dim',), fill_value=-32767.0,
+            compression=self.compression, complevel=self.comp_level
+        )
+        timeVar = self.group.createVariable(
+            'time', 'f4', ('dim',), fill_value=-32767.0,
+            compression=self.compression, complevel=self.comp_level
+        )
 
         self.__enrichLon(lonVar, min(self.lon), max(self.lon))
         self.__enrichLat(latVar, min(self.lat), max(self.lat))
@@ -505,7 +522,10 @@ class DomsNetCDFValueWriter:
 
         # Add depth variable, if present
         if self.depth and any(self.depth):
-            depthVar = self.group.createVariable('depth', 'f4', ('dim',), fill_value=-32767.0)
+            depthVar = self.group.createVariable(
+                'depth', 'f4', ('dim',), fill_value=-32767.0,
+                compression=self.compression, complevel=self.comp_level
+            )
             self.__enrichDepth(depthVar, self.__calcMin(self.depth), max(self.depth))
             depthVar[:] = self.depth
 
@@ -533,7 +553,9 @@ class DomsNetCDFValueWriter:
                 cf_name = variable[1]
 
                 data_variable = self.group.createVariable(
-                    cf_name if cf_name is not None and cf_name != '' else name, 'f4', ('dim',), fill_value=-32767.0)
+                    cf_name if cf_name is not None and cf_name != '' else name, 'f4', ('dim',),
+                    fill_value=-32767.0, compression=self.compression, complevel=self.comp_level
+                )
                 # Find min/max for data variables. It is possible for 'None' to
                 # be in this list, so filter those out when doing the calculation.
                 min_data = np.nanmin(variables[variable])

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 
-netcdf4==1.5.5.1
+netcdf4==1.6.4
 basemap==1.2.2
 scipy==1.6.0
 pyspark==3.2.1
