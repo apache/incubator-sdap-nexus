@@ -231,10 +231,103 @@ class Matchup(NexusCalcSparkTornadoHandler):
         prioritize_distance = request.get_boolean_arg("prioritizeDistance", default=True)
 
 
+        output_type = request.get_argument("output", default='JSON')
+
+        caml_params = {}
+
+        if output_type == 'CAML':
+            primary = request.get_argument("camlPrimary")
+            if primary is None:
+                raise NexusProcessingException(reason="Primary dataset argument is required when outputting in CAML format", code=400)
+
+            secondary = request.get_argument("camlSecondary")
+            if secondary is None:
+                raise NexusProcessingException(reason="Secondary dataset argument is required when outputting in CAML format", code=400)
+
+            if secondary not in insitu_params:
+                raise NexusProcessingException(
+                    reason=f"Parameter {secondary} not supported. Must be one of {insitu_params}", code=400)
+
+            parameter_s = secondary # Override parameter as it makes no sense for it to differ
+
+            CHART_TYPES = [
+                'time_series',
+                'scatter',
+                'histogram_primary',
+                'histogram_secondary',
+                'histogram_primary_timeseries',
+                'histogram_secondary_timeseries',
+                'trajectory'
+            ]
+
+            types_arg = request.get_argument("camlChartTypes")
+
+            if types_arg is None:
+                types = {
+                    'time_series': False,
+                    'scatter': True,
+                    'histogram_primary': True,
+                    'histogram_secondary': True,
+                    'histogram_primary_timeseries': True,
+                    'histogram_secondary_timeseries': True,
+                    'trajectory': True
+                }
+            else:
+                types_arg = types_arg.split(',')
+
+                types = {
+                    'time_series': False,
+                    'scatter': False,
+                    'histogram_primary': False,
+                    'histogram_secondary': False,
+                    'histogram_primary_timeseries': False,
+                    'histogram_secondary_timeseries': False,
+                    'trajectory': False
+                }
+
+                for t in types_arg:
+                    if t not in CHART_TYPES:
+                        raise NexusProcessingException(
+                            reason=f"Invalid chart type argument: {t}",
+                            code=400
+                        )
+
+                    types[t] = True
+
+            caml_params['primary'] = primary
+            caml_params['secondary'] = secondary
+            caml_params['charts'] = types
+            caml_params['format'] = 'Matchup'
+
+            hist_bins = request.get_argument("camlHistBins")
+
+            if hist_bins and (types['histogram_primary'] or types['histogram_secondary'] or
+                              types['histogram_primary_timeseries'] or types['histogram_secondary_timeseries']):
+                hist_bins = hist_bins.split(',')
+
+                bins = []
+
+                for b in hist_bins:
+                    try:
+                        v = int(b)
+                        if v in bins:
+                            raise NexusProcessingException(reason="duplicate bin in parameter", code=400)
+                        bins.append(v)
+                    except:
+                        raise NexusProcessingException("non numeric argument provided for bins", code=400)
+
+                if len(bins) == 0:
+                    raise NexusProcessingException(reason='No bins given in argument', code=400)
+
+                bins.sort()
+
+                caml_params['histogram_bins'] = bins
+
         return bounding_polygon, primary_ds_name, secondary_ds_names, parameter_s, \
                start_time, start_seconds_from_epoch, end_time, end_seconds_from_epoch, \
                depth_min, depth_max, time_tolerance, radius_tolerance, \
-               platforms, match_once, result_size_limit, prioritize_distance
+               platforms, match_once, result_size_limit, prioritize_distance, \
+               output_type, caml_params
 
     def get_job_pool(self, tile_ids):
         if len(tile_ids) > LARGE_JOB_THRESHOLD:
@@ -310,7 +403,8 @@ class Matchup(NexusCalcSparkTornadoHandler):
         bounding_polygon, primary_ds_name, secondary_ds_names, parameter_s, \
         start_time, start_seconds_from_epoch, end_time, end_seconds_from_epoch, \
         depth_min, depth_max, time_tolerance, radius_tolerance, \
-        platforms, match_once, result_size_limit, prioritize_distance = self.parse_arguments(request)
+        platforms, match_once, result_size_limit, prioritize_distance, output_type, \
+        caml_params = self.parse_arguments(request)
 
         args = {
             "primary": primary_ds_name,
@@ -323,6 +417,9 @@ class Matchup(NexusCalcSparkTornadoHandler):
             "platforms": platforms,
             "parameter": parameter_s
         }
+
+        if output_type == 'CAML':
+            args['caml_params'] = caml_params
 
         if depth_min is not None:
             args["depthMin"] = float(depth_min)

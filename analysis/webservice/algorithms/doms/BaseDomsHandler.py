@@ -113,6 +113,9 @@ class DomsQueryResults(NexusResults):
     def toNetCDF(self):
         return DomsNetCDFFormatter.create(self.__executionId, self.results(), self.__args, self.__details)
 
+    def toCAML(self, request):
+        return DomsCAMLFormatter.create(self.__executionId, self.results(), self.__args, self.__details, request)
+
     def filename(self):
         return f'CDMS_{self.__executionId}'
 
@@ -600,3 +603,453 @@ class DomsNetCDFValueWriter:
         var.axis = "Z"
         var.positive = "Down"
 
+
+class DomsCAMLFormatter:
+    @staticmethod
+    def create(executionId, results, params, details, request):
+        import copy
+
+        def empty_if_none(string):
+            if string is not None:
+                return string
+            else:
+                return ""
+
+        def datetime_to_iso(dt):
+            return dt.isoformat() + "+0000"
+
+        def get_match_by_variable_name(matches, variable_name):
+            m = [m for m in matches if m['cf_variable_name'] == variable_name]
+            return m[0]
+
+        def round_down_day(dt):
+            return datetime(*dt.timetuple()[:3])
+
+        query = {}
+        result = {}
+        caml_params = params['caml_params']
+
+        query['apiRequest'] = f"{request.protocol}://{request.host}{request.uri}"
+        query['analysisName'] = 'colocation_trajectory'
+        query['primaryName'] = params['primary']
+        query['secondaryName'] = params['matchup']
+
+        b = params['bbox'].split(',')
+
+        query['bounds'] = {
+            "lon_min": float(b[0]),
+            "lon_max": float(b[2]),
+            "lat_min": float(b[1]),
+            "lat_max": float(b[3]),
+            "time_start": datetime_to_iso(params['startTime']),
+            "time_end": datetime_to_iso(params['endTime'])
+        }
+
+        variables = []
+        charts = []
+
+        if len(results) > 0:
+            try:
+                variables.append({
+                    "object": "primary",
+                    "name": caml_params['primary'],
+                    "units": empty_if_none(get_match_by_variable_name(results[0]['primary'], caml_params['primary'])["variable_unit"])
+                })
+            except KeyError:
+                variables.append({
+                    "object": "primary",
+                    "name": caml_params['primary'],
+                    "units": ""
+                })
+
+            results.sort(key=lambda e: e['time'])
+
+            try:
+                variables.append({
+                    "object": "secondary",
+                    "name": caml_params['secondary'],
+                    "units": empty_if_none(get_match_by_variable_name(results[0]['matches'][0]['secondary'], caml_params['secondary'])["variable_unit"])
+                })
+            except KeyError:
+                variables.append({
+                    "object": "secondary",
+                    "name": caml_params['secondary'],
+                    "units": ""
+                })
+
+            result['variable'] = variables
+
+            data = []
+
+            if caml_params['charts']['time_series']:
+                data = [[], []]
+
+                for r in results:
+                    secondary = None
+                    secondary_match = None
+
+                    for s in r['matches']:
+                        try:
+                            if caml_params['format'] == 'Matchup':
+                                secondary_match = get_match_by_variable_name(s['secondary'], caml_params['secondary'])
+                                secondary = s
+                                break
+                            else:
+                                if caml_params['secondary'] in s:
+                                    secondary = s
+                                    secondary_match = {'variable_value': s[caml_params['secondary']]}
+                                    break
+                        except:
+                            pass
+
+                    if secondary is None:
+                        continue
+
+                    if caml_params['format'] == 'Matchup':
+                        data[0].append([datetime_to_iso(r['time']), get_match_by_variable_name(r['primary'], caml_params['primary'])['variable_value']])
+                    else:
+                        data[0].append([datetime_to_iso(r['time']), r[caml_params['primary']]])
+                    data[1].append([datetime_to_iso(secondary['time']), secondary_match['variable_value']])
+
+                data[0].sort(key=lambda e: (e[0], e[1]))
+                data[1].sort(key=lambda e: (e[0], e[1]))
+
+                charts.append({
+                    "object": ["primary"],
+                    "type": "xy_line_point",
+                    "title": "Time Series",
+                    "xAxis_label": 'Time',
+                    "yAxis_label": f"{variables[0]['name']} ({variables[0]['units']})",
+                    "xAxis_type": "datetime",
+                    "yAxis_type": "number",
+                    "xySeries_data": copy.deepcopy(data[0]),
+                    "xySeries_labels": [query["primaryName"]]
+                })
+
+                charts.append({
+                    "object": ["secondary"],
+                    "type": "xy_line_point",
+                    "title": "Time Series",
+                    "xAxis_label": 'Time',
+                    "yAxis_label": f"{variables[1]['name']} ({variables[1]['units']})",
+                    "xAxis_type": "datetime",
+                    "yAxis_type": "number",
+                    "xySeries_data": copy.deepcopy(data[1]),
+                    "xySeries_labels": [query["secondaryName"]]
+                })
+
+                data.clear()
+
+            if caml_params['charts']['scatter']:
+                for r in results:
+                    secondary_match = None
+
+                    for s in r['matches']:
+                        try:
+                            if caml_params['format'] == 'Matchup':
+                                secondary_match = get_match_by_variable_name(s['secondary'], caml_params['secondary'])
+                                break
+                            else:
+                                if caml_params['secondary'] in s:
+                                    secondary_match = {'variable_value': s[caml_params['secondary']]}
+                                    break
+                        except:
+                            pass
+
+                    if secondary_match is None:
+                        continue
+
+                    data.append(
+                        [
+                            get_match_by_variable_name(r['primary'], caml_params['primary'])['variable_value']
+                            if caml_params['format'] == 'Matchup' else r[caml_params['primary']],
+                            secondary_match['variable_value']
+                        ]
+                    )
+
+                data.sort(key=lambda e: (e[0], e[1]))
+
+                charts.append({
+                    "object": ["primary", "secondary"],
+                    "type": "xy_scatter_point",
+                    "title": "Scatter Plot",
+                    "xAxis_label": f"{query['primaryName']} ({variables[0]['units']})",
+                    "yAxis_label": f"{query['secondaryName']} ({variables[1]['units']})",
+                    "xAxis_type": "number",
+                    "yAxis_type": "number",
+                    "xySeries_data": copy.deepcopy(data),
+                    "xySeries_labels": f"{variables[0]['name']} x {variables[1]['name']}"
+                })
+
+                data.clear()
+
+            if caml_params['charts']['histogram_primary'] or caml_params['charts']['histogram_secondary']:
+                primary_histdata = {}
+                secondary_histdata = {}
+
+                for r in results:
+                    secondary = None
+                    secondary_match = None
+
+                    for s in r['matches']:
+                        try:
+                            if caml_params['format'] == 'Matchup':
+                                secondary_match = get_match_by_variable_name(s['secondary'], caml_params['secondary'])
+                                secondary = s
+                                break
+                            else:
+                                if caml_params['secondary'] in s:
+                                    secondary = s
+                                    secondary_match = {'variable_value': s[caml_params['secondary']]}
+                                    break
+                        except:
+                            pass
+
+                    if secondary is None:
+                        continue
+
+                    pts = 'fixed'
+                    sts = 'fixed'
+
+                    if pts not in primary_histdata:
+                        primary_histdata[pts] = {
+                            'data': [],
+                            'hist': None
+                        }
+
+                    if sts not in secondary_histdata:
+                        secondary_histdata[sts] = {
+                            'data': [],
+                            'hist': None
+                        }
+
+                    if caml_params['format'] == 'Matchup':
+                        primary_histdata[pts]['data'].append(get_match_by_variable_name(r['primary'], caml_params['primary'])['variable_value'])
+                    else:
+                        primary_histdata[pts]['data'].append(r[caml_params['primary']])
+                    secondary_histdata[sts]['data'].append(secondary_match['variable_value'])
+
+                if "histogram_bins" in caml_params:
+                    bins = caml_params['histogram_bins']
+                else:
+                    bins = [-5, 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+
+                for d in primary_histdata:
+                    hist, _ = np.histogram(primary_histdata[d]['data'], bins=bins, density=False)
+                    h = []
+
+                    for i in range(len(hist)):
+                        h.append([bins[i], int(hist[i])])
+
+                    primary_histdata[d]['hist'] = copy.deepcopy(h)
+
+                for d in secondary_histdata:
+                    hist, _ = np.histogram(secondary_histdata[d]['data'], bins=bins, density=False)
+                    h = []
+
+                    for i in range(len(hist)):
+                        h.append([bins[i], int(hist[i])])
+
+                    secondary_histdata[d]['hist'] = copy.deepcopy(h)
+
+                if caml_params['charts']['histogram_primary']:
+                    for d in primary_histdata:
+                        for bin in primary_histdata[d]['hist']:
+                            data.append(bin)
+
+                    charts.append({
+                        "object": ["primary"],
+                        "type": "histogram",
+                        "title": "Frequency Distribution",
+                        "xAxis_label": f"{variables[0]['name']} ({variables[0]['units']})",
+                        "yAxis_label": "frequency (count)",
+                        "xAxis_type": "number",
+                        "yAxis_type": "number",
+                        "xySeries_data": copy.deepcopy(data),
+                        "xySeries_labels": [query['primaryName']]
+                    })
+
+                    data.clear()
+
+                if caml_params['charts']['histogram_secondary']:
+                    for d in secondary_histdata:
+                        for bin in secondary_histdata[d]['hist']:
+                            data.append(bin)
+
+                    charts.append({
+                        "object": ["secondary"],
+                        "type": "histogram",
+                        "title": "Frequency Distribution",
+                        "xAxis_label": f"{variables[1]['name']} ({variables[1]['units']})",
+                        "yAxis_label": "frequency (count)",
+                        "xAxis_type": "number",
+                        "yAxis_type": "number",
+                        "xySeries_data": copy.deepcopy(data),
+                        "xySeries_labels": [query['secondaryName']]
+                    })
+
+                    data.clear()
+
+            if caml_params['charts']['histogram_primary_timeseries'] or \
+                    caml_params['charts']['histogram_secondary_timeseries']:
+                primary_histdata = {}
+                secondary_histdata = {}
+
+                for r in results:
+                    secondary = None
+                    secondary_match = None
+
+                    for s in r['matches']:
+                        try:
+                            if caml_params['format'] == 'Matchup':
+                                secondary_match = get_match_by_variable_name(s['secondary'], caml_params['secondary'])
+                                secondary = s
+                                break
+                            else:
+                                if caml_params['secondary'] in s:
+                                    secondary = s
+                                    secondary_match = {'variable_value': s[caml_params['secondary']]}
+                                    break
+                        except:
+                            pass
+
+                    if secondary is None:
+                        continue
+
+                    pts = datetime_to_iso(round_down_day(r['time']))
+                    sts = datetime_to_iso(round_down_day(secondary['time']))
+
+                    if pts not in primary_histdata:
+                        primary_histdata[pts] = {
+                            'data': [],
+                            'hist': None
+                        }
+
+                    if sts not in secondary_histdata:
+                        secondary_histdata[sts] = {
+                            'data': [],
+                            'hist': None
+                        }
+
+                    if caml_params['format'] == 'Matchup':
+                        primary_histdata[pts]['data'].append(get_match_by_variable_name(r['primary'], caml_params['primary'])['variable_value'])
+                    else:
+                        primary_histdata[pts]['data'].append(r[caml_params['primary']])
+                    secondary_histdata[sts]['data'].append(secondary_match['variable_value'])
+
+                if "histogram_bins" in caml_params:
+                    bins = caml_params['histogram_bins']
+                else:
+                    bins = [-5, 0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]
+
+                for d in primary_histdata:
+                    hist, _ = np.histogram(primary_histdata[d]['data'], bins=bins, density=False)
+                    h = []
+
+                    for i in range(len(hist)):
+                        h.append([bins[i], int(hist[i])])
+
+                    primary_histdata[d]['hist'] = copy.deepcopy(h)
+
+                for d in secondary_histdata:
+                    hist, _ = np.histogram(secondary_histdata[d]['data'], bins=bins, density=False)
+                    h = []
+
+                    for i in range(len(hist)):
+                        h.append([bins[i], int(hist[i])])
+
+                    secondary_histdata[d]['hist'] = copy.deepcopy(h)
+
+                if caml_params['charts']['histogram_primary_timeseries']:
+                    for d in primary_histdata:
+                        d_hist = [d]
+
+                        for bin in primary_histdata[d]['hist']:
+                            d_hist.append(bin)
+
+                        data.append([d_hist])
+
+                    charts.append({
+                        "object": ["primary"],
+                        "type": "histogram_timeseries",
+                        "title": "Frequency Distribution over Time",
+                        "xAxis_label": f"{variables[0]['name']} ({variables[0]['units']})",
+                        "yAxis_label": "frequency (count)",
+                        "xAxis_type": "number",
+                        "yAxis_type": "number",
+                        "xySeries_data": copy.deepcopy(data),
+                        "xySeries_labels": [query['primaryName']]
+                    })
+
+                    data.clear()
+
+                if caml_params['charts']['histogram_secondary_timeseries']:
+                    for d in secondary_histdata:
+                        d_hist = [d]
+
+                        for bin in secondary_histdata[d]['hist']:
+                            d_hist.append(bin)
+
+                        data.append([d_hist])
+
+                    charts.append({
+                        "object": ["secondary"],
+                        "type": "histogram_timeseries",
+                        "title": "Frequency Distribution over Time",
+                        "xAxis_label": f"{variables[1]['name']} ({variables[1]['units']})",
+                        "yAxis_label": "frequency (count)",
+                        "xAxis_type": "number",
+                        "yAxis_type": "number",
+                        "xySeries_data": copy.deepcopy(data),
+                        "xySeries_labels": [query['secondaryName']]
+                    })
+
+                    data.clear()
+
+            if caml_params['charts']['trajectory']:
+                for r in results:
+                    secondary = None
+                    secondary_match = None
+
+                    for s in r['matches']:
+                        try:
+                            if caml_params['format'] == 'Matchup':
+                                secondary_match = get_match_by_variable_name(s['secondary'], caml_params['secondary'])
+                                secondary = s
+                                break
+                            else:
+                                if caml_params['secondary'] in s:
+                                    secondary = s
+                                    secondary_match = {'variable_value': s[caml_params['secondary']]}
+                                    break
+                        except:
+                            pass
+
+                    if secondary_match is None:
+                        continue
+
+                    primary = get_match_by_variable_name(r['primary'], caml_params['primary']) if caml_params['format'] == 'Matchup' else {'variable_value': r[caml_params['primary']]}
+
+                    data.append([
+                        datetime_to_iso(secondary['time']),
+                        [float(secondary['lat']), float(secondary['lon'])],
+                        primary['variable_value'] - secondary_match['variable_value']
+                    ])
+
+                data.sort(key=lambda e: (e[0], e[1][0], e[1][1], e[2]))
+
+                charts.append({
+                    "object": ["secondary"],
+                    "type": "trajectory",
+                    "title": "Along track colocation differences",
+                    "colorbar_label": f"{variables[1]['name']} ({variables[1]['units']})",
+                    "xySeries_data": copy.deepcopy(data),
+                })
+
+                result['chart'] = charts
+
+        return json.dumps(
+            {'executionId': executionId, 'query': query, 'result': result, 'params': params},
+            indent=4,
+            cls=DomsEncoder
+        )

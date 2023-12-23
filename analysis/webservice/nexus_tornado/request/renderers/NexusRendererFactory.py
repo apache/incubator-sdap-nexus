@@ -14,7 +14,7 @@
 # limitations under the License.
 
 class NexusRendererFactory(object):
-    content_types = ["CSV", "JSON", "XML", "PNG", "NETCDF", "ZIP"]
+    content_types = ["CSV", "JSON", "XML", "PNG", "NETCDF", "ZIP", "CAML"]
     module = __import__(__name__)
 
     @classmethod

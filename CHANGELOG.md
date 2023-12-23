@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDAP-473: Added support for matchup job prioritization
 - SDAP-483: Added `.asf.yaml` to configure Jira auto-linking.
 - SDAP-487: Added script to migrate existing `doms.doms_data` data to new schema.
+- SDAP-401: Added JSON output formatting for use with COVERAGE to `/match_spark`
 ### Changed
 - SDAP-453: Updated results storage and retrieval to support output JSON from `/cdmsresults` that matches output from `/match_spark`.
   - **NOTE:** Deploying these changes to an existing SDAP deployment will require modifying the Cassandra database with stored results. There is a script to do so at `/tools/update-doms-data-schema/update.py`
