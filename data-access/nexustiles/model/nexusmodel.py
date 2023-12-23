@@ -91,6 +91,7 @@ class Tile(object):
     data: np.array = None
     is_multi: bool = None
     meta_data: dict = None
+    projection: str = 'grid'
 
     def __str__(self):
         return str(self.get_summary())
@@ -128,27 +129,53 @@ class Tile(object):
     def nexus_point_generator(self, include_nan=False):
         indices = self.get_indices(include_nan)
 
+        if len(indices) == 0 or (isinstance(indices, np.ndarray) and indices.size == 0):
+            return
+        if self.projection == 'grid':
+            lat_slice = slice(1, 2)
+            lon_slice = slice(2, 3)
+            time_slice = slice(0, 1)
+        else:
+            lat_slice = slice(None)
+            lon_slice = slice(None)
+            time_slice = slice(None)
+
         if include_nan:
             for index in indices:
-                time = self.times[index[0]]
-                lat = self.latitudes[index[1]]
-                lon = self.longitudes[index[2]]
+                time = self.times[index[time_slice]]
+                lat = self.latitudes[index[lat_slice]]
+                lon = self.longitudes[index[lon_slice]]
+
                 if self.is_multi:
-                    data_vals = [data[index] for data in self.data]
+                    data_vals = []
+
+                    for data in self.data:
+                        val = data[index]
+
+                        data_vals.append(val if val is not np.ma.masked else np.nan)
                 else:
                     data_vals = self.data[index]
+
                 point = NexusPoint(lat, lon, None, time, index, data_vals)
                 yield point
         else:
             for index in indices:
                 index = tuple(index)
-                time = self.times[index[0]]
-                lat = self.latitudes[index[1]]
-                lon = self.longitudes[index[2]]
+
+                time = self.times[index[time_slice]]
+                lat = self.latitudes[index[lat_slice]]
+                lon = self.longitudes[index[lon_slice]]
+
                 if self.is_multi:
-                    data_vals = [data[index] for data in self.data]
+                    data_vals = []
+
+                    for data in self.data:
+                        val = data[index]
+
+                        data_vals.append(val if val is not np.ma.masked else np.nan)
                 else:
                     data_vals = self.data[index]
+
                 point = NexusPoint(lat, lon, None, time, index, data_vals)
                 yield point
 
@@ -156,7 +183,7 @@ class Tile(object):
         if include_nan:
             return list(np.ndindex(self.data.shape))
         if self.is_multi:
-            combined_data_inv_mask = reduce(np.logical_and, [data.mask for data in self.data])
+            combined_data_inv_mask = reduce(np.logical_and, [np.ma.getmaskarray(data) for data in self.data])
             return np.argwhere(np.logical_not(combined_data_inv_mask))
         else:
             return np.transpose(np.where(np.ma.getmaskarray(self.data) == False)).tolist()

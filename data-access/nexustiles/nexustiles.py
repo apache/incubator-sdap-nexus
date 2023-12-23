@@ -14,9 +14,9 @@
 # limitations under the License.
 
 import configparser
+import json
 import logging
 import sys
-import json
 from datetime import datetime
 from functools import wraps, reduce
 
@@ -27,11 +27,11 @@ from pytz import timezone, UTC
 from shapely.geometry import MultiPolygon, box
 
 from .dao import CassandraProxy
+from .dao import CassandraSwathProxy
 from .dao import DynamoProxy
+from .dao import ElasticsearchProxy
 from .dao import S3Proxy
 from .dao import SolrProxy
-from .dao import ElasticsearchProxy
-
 from .model.nexusmodel import Tile, BBox, TileStats, TileVariable
 
 EPOCH = timezone('UTC').localize(datetime(1970, 1, 1))
@@ -40,7 +40,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt="%Y-%m-%dT%H:%M:%S", stream=sys.stdout)
-logger = logging.getLogger("testing")
+logger = logging.getLogger(__name__)
 
 
 def tile_data(default_fetch=True):
@@ -56,7 +56,7 @@ def tile_data(default_fetch=True):
             if ('fetch_data' in kwargs and kwargs['fetch_data']) or ('fetch_data' not in kwargs and default_fetch):
                 if len(tiles) > 0:
                     cassandra_start = datetime.now()
-                    args[0].fetch_data_for_tiles(*tiles)
+                    args[0].fetch_data_for_tiles(*tiles, desired_projection=args[0].desired_projection)
                     cassandra_duration += (datetime.now() - cassandra_start).total_seconds()
 
             if 'metrics_callback' in kwargs and kwargs['metrics_callback'] is not None:
@@ -79,12 +79,17 @@ class NexusTileServiceException(Exception):
 
 
 class NexusTileService(object):
-    def __init__(self, skipDatastore=False, skipMetadatastore=False, config=None):
+    def __init__(self, skipDatastore=False, skipMetadatastore=False, config=None, desired_projection='grid'):
         self._datastore = None
         self._metadatastore = None
 
         self._config = configparser.RawConfigParser()
         self._config.read(NexusTileService._get_config_files('config/datastores.ini'))
+
+        if desired_projection not in ['grid', 'swath']:
+            raise ValueError(f'Invalid value provided for NexusTileService desired_projection: {desired_projection}')
+
+        self.desired_projection = desired_projection
 
         if config:
             self.override_config(config)
@@ -92,7 +97,10 @@ class NexusTileService(object):
         if not skipDatastore:
             datastore = self._config.get("datastore", "store")
             if datastore == "cassandra":
-                self._datastore = CassandraProxy.CassandraProxy(self._config)
+                if desired_projection == "grid":
+                    self._datastore = CassandraProxy.CassandraProxy(self._config)
+                else:
+                    self._datastore = CassandraSwathProxy.CassandraSwathProxy(self._config)
             elif datastore == "s3":
                 self._datastore = S3Proxy.S3Proxy(self._config)
             elif datastore == "dynamo":
@@ -106,6 +114,9 @@ class NexusTileService(object):
                 self._metadatastore = SolrProxy.SolrProxy(self._config)
             elif metadatastore == "elasticsearch":
                 self._metadatastore = ElasticsearchProxy.ElasticsearchProxy(self._config)
+
+        logger.info(f'Created new NexusTileService with data store {type(self._datastore)} and metadata '
+                    f'store {type(self._metadatastore)}. Desired projection: {desired_projection}')
 
     def override_config(self, config):
         for section in config.sections():
@@ -352,21 +363,39 @@ class NexusTileService(object):
         bounds = self._metadatastore.find_distinct_bounding_boxes_in_polygon(bounding_polygon, ds, start_time, end_time)
         return [box(*b) for b in bounds]
 
+    def _data_mask_logical_or(self, tile):
+        # Or together the masks of the individual arrays to create the new mask
+        if self.desired_projection == 'grid':
+            data_mask = ma.getmaskarray(tile.times)[:, np.newaxis, np.newaxis] \
+                        | ma.getmaskarray(tile.latitudes)[np.newaxis, :, np.newaxis] \
+                        | ma.getmaskarray(tile.longitudes)[np.newaxis, np.newaxis, :]
+        else:
+            if len(tile.times.shape) == 1:
+                data_mask = ma.getmaskarray(tile.times)[:, np.newaxis, np.newaxis] \
+                            | ma.getmaskarray(tile.latitudes)[np.newaxis, :, :] \
+                            | ma.getmaskarray(tile.longitudes)[np.newaxis, :, :]
+            else:
+                data_mask = ma.getmaskarray(tile.times) \
+                            | ma.getmaskarray(tile.latitudes) \
+                            | ma.getmaskarray(tile.longitudes)
+
+        return data_mask
+
     def mask_tiles_to_bbox(self, min_lat, max_lat, min_lon, max_lon, tiles):
 
         for tile in tiles:
             tile.latitudes = ma.masked_outside(tile.latitudes, min_lat, max_lat)
             tile.longitudes = ma.masked_outside(tile.longitudes, min_lon, max_lon)
 
-            # Or together the masks of the individual arrays to create the new mask
-            data_mask = ma.getmaskarray(tile.times)[:, np.newaxis, np.newaxis] \
-                        | ma.getmaskarray(tile.latitudes)[np.newaxis, :, np.newaxis] \
-                        | ma.getmaskarray(tile.longitudes)[np.newaxis, np.newaxis, :]
+            data_mask = self._data_mask_logical_or(tile)
 
             # If this is multi-var, need to mask each variable separately.
             if tile.is_multi:
                 # Combine space/time mask with existing mask on data
-                data_mask = reduce(np.logical_or, [tile.data[0].mask, data_mask])
+                # Data masks are ANDed because we want to mask out only when ALL data vars are invalid
+                combined_data_mask = reduce(np.logical_and, [ma.getmaskarray(d) for d in tile.data])
+                # We now OR in the bounds mask because out of bounds data must be excluded regardless of validity
+                data_mask = np.logical_or(combined_data_mask, data_mask)
 
                 num_vars = len(tile.data)
                 multi_data_mask = np.repeat(data_mask[np.newaxis, ...], num_vars, axis=0)
@@ -384,10 +413,7 @@ class NexusTileService(object):
             tile.latitudes = ma.masked_outside(tile.latitudes, min_lat, max_lat)
             tile.longitudes = ma.masked_outside(tile.longitudes, min_lon, max_lon)
 
-            # Or together the masks of the individual arrays to create the new mask
-            data_mask = ma.getmaskarray(tile.times)[:, np.newaxis, np.newaxis] \
-                        | ma.getmaskarray(tile.latitudes)[np.newaxis, :, np.newaxis] \
-                        | ma.getmaskarray(tile.longitudes)[np.newaxis, np.newaxis, :]
+            data_mask = self._data_mask_logical_or(tile)
 
             tile.data = ma.masked_where(data_mask, tile.data)
 
@@ -418,10 +444,7 @@ class NexusTileService(object):
             for tile in tiles:
                 tile.times = ma.masked_outside(tile.times, start_time, end_time)
 
-                # Or together the masks of the individual arrays to create the new mask
-                data_mask = ma.getmaskarray(tile.times)[:, np.newaxis, np.newaxis] \
-                            | ma.getmaskarray(tile.latitudes)[np.newaxis, :, np.newaxis] \
-                            | ma.getmaskarray(tile.longitudes)[np.newaxis, np.newaxis, :]
+                data_mask = self._data_mask_logical_or(tile)
 
                 # If this is multi-var, need to mask each variable separately.
                 if tile.is_multi:
@@ -450,7 +473,7 @@ class NexusTileService(object):
         """
         return self._metadatastore.get_tile_count(ds, bounding_polygon, start_time, end_time, metadata, **kwargs)
 
-    def fetch_data_for_tiles(self, *tiles):
+    def fetch_data_for_tiles(self, *tiles, **kwargs):
 
         nexus_tile_ids = set([tile.tile_id for tile in tiles])
         matched_tile_data = self._datastore.fetch_nexus_tiles(*nexus_tile_ids)
@@ -461,8 +484,12 @@ class NexusTileService(object):
         if len(missing_data) > 0:
             raise Exception("Missing data for tile_id(s) %s." % missing_data)
 
+        desired_projection = kwargs['desired_projection'] if 'desired_projection' in kwargs else self.desired_projection
+
         for a_tile in tiles:
-            lats, lons, times, data, meta, is_multi_var = tile_data_by_id[a_tile.tile_id].get_lat_lon_time_data_meta()
+            lats, lons, times, data, meta, is_multi_var = tile_data_by_id[a_tile.tile_id].get_lat_lon_time_data_meta(
+                projection=desired_projection
+            )
 
             a_tile.latitudes = lats
             a_tile.longitudes = lons
@@ -470,6 +497,7 @@ class NexusTileService(object):
             a_tile.data = data
             a_tile.meta_data = meta
             a_tile.is_multi = is_multi_var
+            a_tile.projection = desired_projection
 
             del (tile_data_by_id[a_tile.tile_id])
 

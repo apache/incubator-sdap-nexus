@@ -48,8 +48,8 @@ import tempfile
 
 
 class BaseDomsQueryCalcHandler(NexusCalcHandler):
-    def __init__(self, tile_service_factory):
-        NexusCalcHandler.__init__(self, tile_service_factory)
+    def __init__(self, tile_service_factory, **kwargs):
+        NexusCalcHandler.__init__(self, tile_service_factory, **kwargs)
 
     def getDataSourceByName(self, source):
         for s in config.ENDPOINTS:

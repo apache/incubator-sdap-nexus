@@ -39,7 +39,10 @@ class NexusCalcHandler(object):
 
     def __init__(self, tile_service_factory, **kwargs):
         self._tile_service_factory = tile_service_factory
-        self._tile_service = tile_service_factory()
+        if 'desired_projection' in kwargs:
+            self._tile_service = tile_service_factory(desired_projection=kwargs['desired_projection'])
+        else:
+            self._tile_service = tile_service_factory()
 
     def _get_tile_service(self):
         return self._tile_service

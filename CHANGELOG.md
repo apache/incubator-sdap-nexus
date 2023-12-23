@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDAP-473: Added support for matchup job prioritization
 - SDAP-483: Added `.asf.yaml` to configure Jira auto-linking.
 - SDAP-487: Added script to migrate existing `doms.doms_data` data to new schema.
+- SDAP-440: Added `CassandraSwathProxy` to process tiles in a method optimized for swath format
+- SDAP-440: Set up framework to roll out changes to SDAP algorithms to work with swath formatted data for both tile types rather than having tiles formatted as gridded which is very memory inefficient.
 ### Changed
 - SDAP-453: Updated results storage and retrieval to support output JSON from `/cdmsresults` that matches output from `/match_spark`.
   - **NOTE:** Deploying these changes to an existing SDAP deployment will require modifying the Cassandra database with stored results. There is a script to do so at `/tools/update-doms-data-schema/update.py`
