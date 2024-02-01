@@ -14,7 +14,6 @@ Imported packages:
 * csv
 * collections
 * logging
-    
 
 ## Functions
 ### Function: `assemble_matches(filename)`
@@ -24,10 +23,10 @@ Read a CDMS netCDF file into memory and return a list of matches from the file.
 - `filename` (str): the CDMS netCDF file name.
     
 #### Returns
-- `matches` (list): List of matches. 
+- `matches` (list): List of matches.
 
 Each list element in `matches` is a dictionary organized as follows:
-    For match `m`, netCDF group `GROUP` ('PrimaryData' or 'SecondaryData'), and netCDF group variable `VARIABLE`:
+	For match `m`, netCDF group `GROUP` ('PrimaryData' or 'SecondaryData'), and netCDF group variable `VARIABLE`:
 
 `matches[m][GROUP]['matchID']`: netCDF `MatchedRecords` dimension ID for the match
 `matches[m][GROUP]['GROUPID']`: GROUP netCDF `dim` dimension ID for the record
@@ -42,7 +41,37 @@ matches[0]['PrimaryData']['PrimaryDataID']
 matches[0]['SecondaryData']['SecondaryDataID']
 ```
 
-        
+Data is returned in one-to-one matches (ex. matches[0] returns one secondary record associated with its primary match)
+
+### Function: `assemble_matches_by_primary(filename)`
+Read a CDMS netCDF file and return a list of matches, in which secondary data points are grouped together by their primary data point match.
+This function is intended to return results in a similar fashion as the original `assemble_matches` function, however the number of results and formatting of the data is different. Namely, all secondary is associated with its primary match and can be accessed without having to reach across multiple matches.   
+
+#### Parameters 
+- `filename` (str): the CDMS netCDF file name.
+    
+#### Returns
+- `matches` (list): Three dimensional array of matches. Matches are returned as primary records grouped together with all associated secondary records.  
+
+Each list element in `matches` is an array that contains the following sub-elements:
+	For match `m` (indexed on the number of 'PrimaryData' points), netCDF group `GROUP` ('PrimaryData' or 'SecondaryData'), and netCDF group vraiable `VARIABLE`: 
+
+`matches[m][GROUP]['matchID']`: netCDF `MatchedRecords` dimension ID for each match. Returned as an ordered array.
+`matches[m][GROUP]['GROUPID']`: GROUP netCDF `dim` dimension ID for each record. Returned as a single element for 'PrimaryData' and an ordered array for 'SecondaryData'
+`matches[m][GROUP][VARIABLE]`: variable value. Returned as an ordered array. 
+
+For example, to access the timestamps of the primary data and the secondary data of the first match in the list, along with the `MatchedRecords` dimension ID and the groups' `dim` dimension ID:
+```python
+matches[0]['PrimaryData']['time']
+matches[0]['SecondaryData']['time'] (returns an array of secondary time values, with order preserved)
+matches[0]['PrimaryData']['matchID']
+matches[0]['PrimaryData']['PrimaryDataID']
+matches[0]['SecondaryData']['SecondaryDataID'] (returns an array of secondary data ID values, with order preserved)
+```
+
+Data is returned in one-to-many matches (ex. matches[0] returns an array of secondary record data associates with its primary match)
+
+
 ### Function: `matches_to_csv(matches, csvfile)`
 Write the CDMS matches to a CSV file. Include a header of column names which are based on the group and variable names from the netCDF file.
     

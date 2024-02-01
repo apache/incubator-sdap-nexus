@@ -62,6 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDAP-488: Workaround to build issue on Apple Silicon (M1/M2). Image build installs nexusproto through PyPI instead of building from source. A build arg `BUILD_NEXUSPROTO` was defined to allow building from source if desired
 - SDAP-496: Fix `solr-cloud-init` image failing to run.
 ### Security
+### Unreleased
+- SDAP-470: Modified `cdms-reader` tool to support primary to secondary matchups
 
 ## [1.1.0] - 2023-04-26
 ### Added
