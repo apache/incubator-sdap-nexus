@@ -157,7 +157,16 @@ class TimeSeriesSparkHandlerImpl(NexusCalcSparkHandler):
         nparts_requested = request.get_nparts()
         normalize_dates = request.get_normalize_dates()
 
-        return ds, bounding_polygon, start_seconds_from_epoch, end_seconds_from_epoch, apply_seasonal_cycle_filter, apply_low_pass_filter, nparts_requested, normalize_dates
+        min_elevation, max_elevation = request.get_elevation_args()
+
+        if (min_elevation and max_elevation) and min_elevation > max_elevation:
+            raise NexusProcessingException(
+                reason='Min elevation must be less than or equal to max elevation',
+                code=400
+            )
+
+        return ds, bounding_polygon, start_seconds_from_epoch, end_seconds_from_epoch, apply_seasonal_cycle_filter, \
+               apply_low_pass_filter, nparts_requested, normalize_dates, min_elevation, max_elevation
 
     def calc(self, request, **args):
         """
@@ -167,8 +176,8 @@ class TimeSeriesSparkHandlerImpl(NexusCalcSparkHandler):
         :return:
         """
         start_time = datetime.now()
-        ds, bounding_polygon, start_seconds_from_epoch, end_seconds_from_epoch, apply_seasonal_cycle_filter, apply_low_pass_filter, nparts_requested, normalize_dates = self.parse_arguments(
-            request)
+        ds, bounding_polygon, start_seconds_from_epoch, end_seconds_from_epoch, apply_seasonal_cycle_filter, \
+        apply_low_pass_filter, nparts_requested, normalize_dates, min_elevation, max_elevation = self.parse_arguments(request)
         metrics_record = self._create_metrics_record()
 
         resultsRaw = []
@@ -201,6 +210,7 @@ class TimeSeriesSparkHandlerImpl(NexusCalcSparkHandler):
                                          metrics_record.record_metrics,
                                          normalize_dates,
                                          spark_nparts=spark_nparts,
+                                         min_elevation=min_elevation, max_elevation=max_elevation,
                                          sc=self._sc)
 
             if apply_seasonal_cycle_filter:
@@ -223,6 +233,7 @@ class TimeSeriesSparkHandlerImpl(NexusCalcSparkHandler):
                                                self._tile_service_factory,
                                                metrics_record.record_metrics,
                                                normalize_dates=False,
+                                               min_elevation=min_elevation, max_elevation=max_elevation,
                                                spark_nparts=spark_nparts,
                                                sc=self._sc)
                 clim_indexed_by_month = {datetime.utcfromtimestamp(result['time']).month: result for result in results_clim}
@@ -447,7 +458,7 @@ class TimeSeriesResults(NexusResults):
 
 
 def spark_driver(daysinrange, bounding_polygon, ds, tile_service_factory, metrics_callback, normalize_dates, fill=-9999.,
-                 spark_nparts=1, sc=None):
+                 spark_nparts=1, min_elevation=None, max_elevation=None, sc=None):
     nexus_tiles_spark = [(bounding_polygon, ds,
                           list(daysinrange_part), fill)
                          for daysinrange_part
@@ -456,14 +467,14 @@ def spark_driver(daysinrange, bounding_polygon, ds, tile_service_factory, metric
     # Launch Spark computations
     rdd = sc.parallelize(nexus_tiles_spark, spark_nparts)
     metrics_callback(partitions=rdd.getNumPartitions())
-    results = rdd.flatMap(partial(calc_average_on_day, tile_service_factory, metrics_callback, normalize_dates)).collect()
+    results = rdd.flatMap(partial(calc_average_on_day, tile_service_factory, metrics_callback, normalize_dates, min_elevation, max_elevation)).collect()
     results = list(itertools.chain.from_iterable(results))
     results = sorted(results, key=lambda entry: entry["time"])
 
     return results, {}
 
 
-def calc_average_on_day(tile_service_factory, metrics_callback, normalize_dates, tile_in_spark):
+def calc_average_on_day(tile_service_factory, metrics_callback, normalize_dates, min_elevation, max_elevation, tile_in_spark):
     import shapely.wkt
     from datetime import datetime
     from pytz import timezone
@@ -474,6 +485,8 @@ def calc_average_on_day(tile_service_factory, metrics_callback, normalize_dates,
         return []
     tile_service = tile_service_factory()
 
+    logger.info(f'{max_elevation=} {min_elevation=}')
+
     ds1_nexus_tiles = \
         tile_service.get_tiles_bounded_by_box(bounding_polygon.bounds[1], 
                                             bounding_polygon.bounds[3],
@@ -483,9 +496,11 @@ def calc_average_on_day(tile_service_factory, metrics_callback, normalize_dates,
                                             timestamps[0],
                                             timestamps[-1],
                                             rows=5000,
+                                            min_elevation=min_elevation,
+                                            max_elevation=max_elevation,
                                             metrics_callback=metrics_callback,
                                             distinct=True)
-
+    
     calculation_start = datetime.now()
 
     tile_dict = {}

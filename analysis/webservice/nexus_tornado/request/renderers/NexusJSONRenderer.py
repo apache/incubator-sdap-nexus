@@ -16,6 +16,9 @@
 import sys
 import traceback
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class NexusJSONRenderer(object):
@@ -23,9 +26,19 @@ class NexusJSONRenderer(object):
         self.request = nexus_request
 
     def render(self, tornado_handler, result):
+        logger.info('Rendering JSON result')
+
         tornado_handler.set_header("Content-Type", "application/json")
         try:
             result_str = result.toJson()
+
+            if isinstance(result_str, bytes):
+                tornado_handler.set_header("Content-Type", "application/gzip")
+                tornado_handler.set_header("Content-Disposition",
+                                           "attachment; filename=\"%s\"" % self.request.get_argument('filename',
+                                                                                                     "subset.gz"))
+            logger.info('Writing result')
+
             tornado_handler.write(result_str)
             tornado_handler.finish()
         except AttributeError:

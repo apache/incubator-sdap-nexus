@@ -14,8 +14,11 @@
 # limitations under the License.
 
 
+import io
+import gzip
 import json
 import numpy
+import logging
 
 from datetime import datetime
 from pytz import timezone
@@ -68,6 +71,9 @@ class DataInBoundsSearchCalcHandlerImpl(NexusCalcHandler):
     }
     singleton = True
 
+    def __init__(self, tile_service_factory, **kwargs):
+        NexusCalcHandler.__init__(self, tile_service_factory, desired_projection='swath')
+
     def parse_arguments(self, request):
         # Parse input arguments
 
@@ -114,27 +120,68 @@ class DataInBoundsSearchCalcHandlerImpl(NexusCalcHandler):
                            "Maximum (Northern) Latitude. 'metadataFilter' must be in the form key:value",
                     code=400)
 
-        return ds, parameter_s, start_time, end_time, bounding_polygon, metadata_filter
+        min_elevation, max_elevation = request.get_elevation_args()
+
+        if (min_elevation and max_elevation) and min_elevation > max_elevation:
+            raise NexusProcessingException(
+                reason='Min elevation must be less than or equal to max elevation',
+                code=400
+            )
+
+        compact_result = request.get_boolean_arg('compact')
+
+        return ds, parameter_s, start_time, end_time, bounding_polygon, metadata_filter, min_elevation, max_elevation, compact_result
 
     def calc(self, computeOptions, **args):
-        ds, parameter, start_time, end_time, bounding_polygon, metadata_filter = self.parse_arguments(computeOptions)
+        ds, parameter, start_time, end_time, bounding_polygon,\
+        metadata_filter, min_elevation, max_elevation, compact = self.parse_arguments(computeOptions)
 
         includemeta = computeOptions.get_include_meta()
 
+        log = logging.getLogger(__name__)
+
         min_lat = max_lat = min_lon = max_lon = None
+        tile_service = self._get_tile_service()
+
         if bounding_polygon:
             min_lat = bounding_polygon.bounds[1]
             max_lat = bounding_polygon.bounds[3]
             min_lon = bounding_polygon.bounds[0]
             max_lon = bounding_polygon.bounds[2]
 
-            tiles = self._get_tile_service().get_tiles_bounded_by_box(min_lat, max_lat, min_lon, max_lon, ds, start_time,
-                                                                end_time)
+            tiles = tile_service.find_tiles_in_box(min_lat, max_lat, min_lon, max_lon, ds,  start_time, end_time,
+                                                   min_elevation=min_elevation, max_elevation=max_elevation, fetch_data=False)
+
+            need_to_fetch = True
         else:
             tiles = self._get_tile_service().get_tiles_by_metadata(metadata_filter, ds, start_time, end_time)
+            need_to_fetch = False
 
         data = []
-        for tile in tiles:
+
+        log.info(f'Matched {len(tiles):,} tiles.')
+
+        for i in range(len(tiles)-1, -1, -1): # tile in tiles:
+            tile = tiles.pop(i)
+
+            tile_id = tile.tile_id
+
+            log.info(f'Processing tile {tile_id} | {i=}')
+
+            if need_to_fetch:
+                tile = tile_service.fetch_data_for_tiles(tile)[0]
+                tile = tile_service.mask_tiles_to_bbox(min_lat, max_lat, min_lon, max_lon, [tile])
+                tile = tile_service.mask_tiles_to_time_range(start_time, end_time, tile)
+
+                if min_elevation is not None and max_elevation is not None:
+                    tile = tile_service.mask_tiles_to_elevation(min_elevation, max_elevation, tile)
+
+                if len(tile) == 0:
+                    log.info(f'Skipping empty tile {tile_id}')
+                    continue
+
+                tile = tile[0]
+
             for nexus_point in tile.nexus_point_generator():
 
                 point = dict()
@@ -159,15 +206,26 @@ class DataInBoundsSearchCalcHandlerImpl(NexusCalcHandler):
                     except (KeyError, IndexError):
                         pass
                 else:
-                    point['variable'] = nexus_point.data_vals
+                    variables = []
+
+                    data_vals = nexus_point.data_vals if tile.is_multi else [nexus_point.data_vals]
+
+                    for value, variable in zip(data_vals, tile.variables):
+                        if variable.standard_name:
+                            var_name = variable.standard_name
+                        else:
+                            var_name = variable.variable_name
+
+                        variables.append({var_name: value})
+
+                    point['variables'] = variables
 
                 data.append({
                     'latitude': nexus_point.latitude,
                     'longitude': nexus_point.longitude,
                     'time': nexus_point.time,
-                    'data': [
-                        point
-                    ]
+                    'elevation': nexus_point.depth,
+                    'data': point
                 })
 
         if includemeta and len(tiles) > 0:
@@ -178,14 +236,22 @@ class DataInBoundsSearchCalcHandlerImpl(NexusCalcHandler):
         result = DataInBoundsResult(
             results=data,
             stats={},
-            meta=meta)
+            meta=meta,
+            compact=compact
+        )
 
         result.extendMeta(min_lat, max_lat, min_lon, max_lon, "", start_time, end_time)
+
+        log.info(f'Finished subsetting. Generated {len(data):,} points')
 
         return result
 
 
 class DataInBoundsResult(NexusResults):
+    def __init__(self, results=None, meta=None, stats=None, computeOptions=None, status_code=200, compact=False, **args):
+        NexusResults.__init__(self, results, meta, stats, computeOptions, status_code, **args)
+        self.__compact = compact
+
     def toCSV(self):
         rows = []
 
@@ -229,7 +295,15 @@ class DataInBoundsResult(NexusResults):
         return "\r\n".join(rows)
 
     def toJson(self):
-        return json.dumps(self.results(), indent=4, cls=NpEncoder)
+        if not self.__compact:
+            return json.dumps(self.results(), indent=4, cls=NpEncoder)
+        else:
+            buffer = io.BytesIO()
+            with gzip.open(buffer, 'wt', encoding='ascii') as zip:
+                json.dump(self.results(), zip, cls=NpEncoder)
+
+            buffer.seek(0)
+            return buffer.read()
 
 class NpEncoder(json.JSONEncoder):
     def default(self, obj):

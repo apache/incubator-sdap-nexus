@@ -142,6 +142,8 @@ try:
             add_field(schema_api, 'tile_min_lat', 'pdouble')
             add_field(schema_api, 'tile_max_lon', 'pdouble')
             add_field(schema_api, 'tile_min_lon', 'pdouble')
+            add_field(schema_api, 'tile_min_elevation_d', 'pdouble')
+            add_field(schema_api, 'tile_max_elevation_d', 'pdouble')
 
 finally:
     zk.stop()

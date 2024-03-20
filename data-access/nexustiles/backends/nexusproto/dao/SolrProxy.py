@@ -332,6 +332,39 @@ class SolrProxy(object):
                               search_start_s, search_end_s
                           )
             additionalparams['fq'].append(time_clause)
+            
+        min_elevation = kwargs['min_elevation'] if 'min_elevation' in kwargs else None
+        max_elevation = kwargs['max_elevation'] if 'max_elevation' in kwargs else None
+        
+        if min_elevation and max_elevation:
+            elevation_clause = "(" \
+                          "tile_min_elevation_d:[%s TO %s] " \
+                          "OR tile_max_elevation_d:[%s TO %s] " \
+                          "OR (tile_min_elevation_d:[* TO %s] AND tile_max_elevation_d:[%s TO *])" \
+                          ")" % (
+                              min_elevation, max_elevation,
+                              min_elevation, max_elevation,
+                              min_elevation, max_elevation
+                          )
+            additionalparams['fq'].append(elevation_clause)
+        elif min_elevation:
+            elevation_clause = "(" \
+                           "tile_min_elevation_d:[%s TO *] " \
+                           "OR tile_max_elevation_d:[%s TO *] " \
+                           ")" % (
+                               min_elevation,
+                               min_elevation
+                           )
+            additionalparams['fq'].append(elevation_clause)
+        elif max_elevation:
+            elevation_clause = "(" \
+                           "tile_min_elevation_d:[* TO %s] " \
+                           "OR tile_max_elevation_d:[* TO %s] " \
+                           ")" % (
+                               max_elevation,
+                               max_elevation
+                           )
+            additionalparams['fq'].append(elevation_clause)
 
         self._merge_kwargs(additionalparams, **kwargs)
 

@@ -209,6 +209,38 @@ class NexusTileData(Model):
         else:
             raise NotImplementedError("Only supports grid_tile, swath_tile, swath_multi_variable_tile, and time_series_tile")
 
+    def get_elevation_array(self):
+        tile_type = self._get_nexus_tile().WhichOneof("tile_type")
+        tile_data = getattr(self._get_nexus_tile(), tile_type)
+
+        if not tile_data.HasField('elevation'):
+            return None
+
+        elevation_data = np.ma.masked_invalid(from_shaped_array(tile_data.elevation))
+
+        if tile_type in ['swath_tile', 'swath_multi_variable_tile']:
+            latitude_data = np.ma.masked_invalid(from_shaped_array(tile_data.latitude)).reshape(-1)
+            longitude_data = np.ma.masked_invalid(from_shaped_array(tile_data.longitude)).reshape(-1)
+            time_data = np.ma.masked_invalid(from_shaped_array(tile_data.time)).reshape(-1)
+
+            if np.all(time_data == np.min(time_data)):
+                time_data = np.array([np.min(time_data)])
+
+            desired_shape = (
+                len(time_data),
+                len(latitude_data),
+                len(longitude_data),
+            )
+
+            elevation_data = self._to_standard_index(
+                elevation_data,
+                desired_shape,
+                tile_type == 'swath_multi_variable_tile'
+            )
+
+        return elevation_data
+
+
     @staticmethod
     def _to_standard_index(data_array, desired_shape, is_multi_var=False):
         """
