@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from webservice.webmodel import NexusProcessingException
+
 class NexusRendererFactory(object):
-    content_types = ["CSV", "JSON", "XML", "PNG", "NETCDF", "ZIP"]
+    content_types = ["CSV", "JSON", "XML", "PNG", "NETCDF", "ZIP", "GIF"]
     module = __import__(__name__)
 
     @classmethod
@@ -24,6 +26,10 @@ class NexusRendererFactory(object):
             renderer_name = 'Nexus' + content_type + 'Renderer'
             renderer = getattr(cls.module.nexus_tornado.request.renderers, renderer_name)
             return renderer(request)
+        else:
+            raise NexusProcessingException(
+                reason=f'Invalid output format {content_type}', code=400
+            )
 
 
 

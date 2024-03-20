@@ -30,3 +30,4 @@ from . import TileSearch
 from . import TimeAvgMap
 from . import TimeSeries
 from . import TimeSeriesSolr
+from . import Lidar
