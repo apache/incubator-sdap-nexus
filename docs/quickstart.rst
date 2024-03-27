@@ -143,7 +143,7 @@ To start Solr using a volume mount and expose the admin webapp on port 8983:
 
   export SOLR_DATA=~/nexus-quickstart/solr
   mkdir -p ${SOLR_DATA}
-  docker run --name solr --network sdap-net -v ${SOLR_DATA}/:/bitnami -p 8983:8983 -e ZK_HOST="host.docker.internal:2181/solr" -d ${REPO}/sdap-solr-cloud:${SOLR_VERSION}
+  docker run --name solr --network sdap-net -v ${SOLR_DATA}/:/bitnami -p 8983:8983 -e SDAP_ZK_SERVICE_HOST="host.docker.internal" -d ${REPO}/sdap-solr-cloud:${SOLR_VERSION}
 
 This will start an instance of Solr. To initialize it, we need to run the ``solr-cloud-init`` image.
 

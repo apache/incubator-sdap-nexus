@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDAP-493: 
   - Removed `resultSizeLimit` from /match_spark endpoint 
 ### Fixed
+- Updated quickstart docs with corrected command for running Solr via Docker
 ### Security
 
 ## [1.2.0] - 2023-11-22
