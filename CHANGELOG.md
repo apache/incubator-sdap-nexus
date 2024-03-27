@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SDAP-472:
   - Support for Zarr backend (gridded data only)
   - Dataset management endpoints for Zarr datasets
+- SDAP-497: Added tool to ease building of releases. Can build from ASF distributions, git repos, and local
 ### Changed
 - SDAP-493: 
   - Updated /job endpoint to use `executionId` terminology for consistency with existing `/cdmsresults` endpoint
