@@ -126,6 +126,7 @@ external:
 solr:
   enabled: true
   initPodEnabled: true
+  initImage: apache/sdap-solr-cloud-init:1.2.0
   image:
     repository: nexusjpl/solr
     tag: 8.11.1

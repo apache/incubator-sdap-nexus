@@ -16,7 +16,7 @@ spec:
       containers:
       - name: solr-create-collection
         imagePullPolicy: Always
-        image: nexusjpl/solr-cloud-init:1.0.2
+        image: {{ .Values.solr.initImage | default "apache/sdap-solr-cloud-init:1.1.0" }}
         resources:
           requests:
             memory: "0.5Gi"
